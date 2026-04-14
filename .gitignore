@@ -211,3 +211,19 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# =========================
+# Custom Pipeline Outputs
+# =========================
+# Ignore all generated Parquet data files
+*.parquet
+
+# Ignore generated Excel reports
+*.xlsx
+*.csv
+
+# Ignore generated visual GIFs
+*.gif
+
+# Ignore the preprocessing cache folder
+pipeline_cache/
