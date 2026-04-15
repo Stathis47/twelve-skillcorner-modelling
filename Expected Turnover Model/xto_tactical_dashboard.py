@@ -980,7 +980,7 @@ with tab_scout:
                 if col_name == "chains_per_90":
                     fmt = "{:.1f}" 
                 elif col_name == "pressing_risk":
-                    fmt = "{:.6f}"
+                    fmt = "{:.4f}"
                 else:
                     fmt = "{:.4f}"
                 row_data[name_p] = fmt.format(v_p)
