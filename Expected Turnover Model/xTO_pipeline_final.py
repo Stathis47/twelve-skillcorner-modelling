@@ -3,7 +3,7 @@
 CHAIN-LEVEL xTURNOVER MODEL with Exact Game-Theoretic Shapley Values
 
 Execution from Repository Root:
-    python "Week 8/xTO_pipeline.py"
+    python "Expected Turnover Model/xTO_pipeline.py"
 
 Architecture:
 1. Model predicts turnover probability for ENTIRE pressing chains (not individual engagements)
@@ -130,7 +130,8 @@ class PhysicsEngine:
 
         radial_velocity = np.zeros_like(dist, dtype=np.float64)
         valid = dist >= 1e-5
-        radial_velocity[valid] = numer[valid] / dist[valid]
+        # Negate the dot product so that decreasing distance (approaching) yields a positive closing velocity
+        radial_velocity[valid] = -numer[valid] / dist[valid]
 
         same_team_as_possession = (df_track['team_id'].to_numpy() == df_track['possession_team_id'].to_numpy())
         radial_velocity[same_team_as_possession] = 0.0
@@ -382,9 +383,14 @@ class ChainFeatureEngine:
             eng_windows['frame_end'] = eng_windows['frame_end'].fillna(eng_windows['frame_start']).astype(int)
             eng_windows['frame_start'] = eng_windows['frame_start'].astype(int)
 
+            # Define a run-up window (e.g., 1.5 seconds / 15 frames) to catch the sprint
+            run_up_frames = int(1.5 * fps)
+
             radial_merge = player_radial_velocity.merge(eng_windows, on='player_id', how='inner')
+            
+            #Expand the start bound backwards by the run-up window
             in_window = (
-                (radial_merge['frame'] >= radial_merge['frame_start']) &
+                (radial_merge['frame'] >= radial_merge['frame_start'] - run_up_frames) &
                 (radial_merge['frame'] <= radial_merge['frame_end'])
             )
             radial_by_eng = (
@@ -396,33 +402,31 @@ class ChainFeatureEngine:
             engagements_df = engagements_df.drop(columns=['frame_max_radial_velocity'], errors='ignore')
             engagements_df = engagements_df.merge(radial_by_eng, on='event_id', how='left')
 
-        engagements_df['frame_max_radial_velocity'] = engagements_df['frame_max_radial_velocity'].fillna(0.0)
-        engagements_df = engagements_df.sort_values(['pressing_chain_index', 'frame_start'])
-
         chain_features = engagements_df.groupby('pressing_chain_index').agg(
             chain_size=('player_id', 'nunique'),
             chain_start_frame=('frame_start', 'min'),
             chain_end_frame=('frame_end', 'max'),
             chain_mean_y=('y_start', 'mean'),
-            chain_max_radial_velocity=('frame_max_radial_velocity', 'max'),
-            mean_dist_to_goal=('dist_to_goal', 'mean'),
+            max_radial_velocity=('frame_max_radial_velocity', 'max'),
+            distance_to_goal=('dist_to_goal', 'mean'),
             forward_pressing_ratio=('forward_pressing', 'mean'),
             defensive_line_height=('defensive_line_height', 'mean'),
             chain_success=('chain_success', 'max'),
             conceded_xT=('conceded_xT', 'first'),
-            mean_delta_n_passing_options=('engagement_delta_options', 'mean'),
+            generated_xT=('generated_xT', 'first'),
+            delta_n_passing_options=('engagement_delta_options', 'mean'),
             game_state=('game_state', 'first'),
             third_start=('third_start', 'first'),
             match_id=('match_id', 'first'),
-            chain_length_sc=('pressing_chain_length', 'max'),
-            chain_mean_LNS=('LNS', 'mean'),
-            chain_mean_defensive_proximity=('Defensive_Proximity', 'mean')
+            possession_chain_length=('pressing_chain_length', 'max'),
+            local_numerical_superiority=('LNS', 'mean'),
+            defensive_proximity=('Defensive_Proximity', 'mean')
         ).reset_index()
         
         chain_features['chain_duration'] = (chain_features['chain_end_frame'] - chain_features['chain_start_frame']) / fps
         chain_features['engagement_density'] = chain_features['chain_size'] / (chain_features['chain_duration'] + 0.1) 
         chain_features = chain_features.drop(columns=['chain_start_frame', 'chain_end_frame'])
-        chain_features['chain_proximity_to_sideline'] = np.abs(chain_features['chain_mean_y'])
+        chain_features['proximity_to_sideline'] = np.abs(chain_features['chain_mean_y'])
         chain_features['is_coordinated_press'] = (chain_features['chain_size'] > 1).astype(int)
         
         player_chain_map = (
@@ -439,10 +443,14 @@ class ChainFeatureEngine:
         for global_chain_id, group in tqdm(engagements_df.groupby('global_chain_id'), desc="Preparing Subset Lookups"):
             engs = group.to_dict('records')
             original_players = set(group['player_id'].unique())
+            if 'pressing_chain_length' in group.columns:
+                chain_length = int(group['pressing_chain_length'].fillna(1).max())
+            else:
+                chain_length = len(engs)
             lookups[global_chain_id] = {
                 'engagements': engs,
                 'original_players': original_players,
-                'chain_length_sc': len(engs)
+                'chain_length': chain_length
             }
         return lookups
 
@@ -456,6 +464,7 @@ class ChainFeatureEngine:
         if not active_engs: return None
 
         count = len(active_engs)
+        chain_length = lookup_data.get('chain_length', count)
         mean_delta_n_passing_options = sum(e.get('engagement_delta_options', 0) for e in active_engs) / count
         mean_y = sum(e['y_start'] for e in active_engs) / count
         max_radial_velocity = max((e.get('frame_max_radial_velocity', 0) for e in active_engs), default=0.0)
@@ -490,18 +499,18 @@ class ChainFeatureEngine:
 
         features = {
             'chain_size': len(subset_set),
-            'chain_length_sc': count,
+            'possession_chain_length': chain_length,
             'chain_mean_y': mean_y,
-            'chain_proximity_to_sideline': abs(mean_y),
+            'proximity_to_sideline': abs(mean_y),
             'chain_duration': sub_duration,
             'engagement_density': sub_density,
-            'chain_max_radial_velocity': max_radial_velocity,
-            'mean_dist_to_goal': mean_dist_to_goal,
+            'max_radial_velocity': max_radial_velocity,
+            'distance_to_goal': mean_dist_to_goal,
             'forward_pressing_ratio': forward_pressing_ratio,
             'defensive_line_height': defensive_line_height,
-            'mean_delta_n_passing_options': mean_delta_n_passing_options,
-            'chain_mean_LNS': mean_lns,
-            'chain_mean_defensive_proximity': mean_defensive_proximity,
+            'delta_n_passing_options': mean_delta_n_passing_options,
+            'local_numerical_superiority': mean_lns,
+            'defensive_proximity': mean_defensive_proximity,
             'is_coordinated_press': 1 if len(subset_set) > 1 else 0
         }
         return features
@@ -598,21 +607,40 @@ class MatchProcessor:
         engagement_data['match_id'] = match_id
 
         has_xthreat = 'xthreat' in dynamic_df.columns
+        has_targeted_xthreat = 'player_targeted_xthreat' in dynamic_df.columns
         conceded_xT_map = {}
-        if has_xthreat:
-            for chain_id, chain_group in engagement_data.groupby('pressing_chain_index'):
-                if chain_group['chain_success'].iloc[0] == 1:
-                    conceded_xT_map[chain_id] = 0.0
-                else:
+        generated_xT_map = {}
+        for chain_id, chain_group in engagement_data.groupby('pressing_chain_index'):
+            chain_success = chain_group['chain_success'].iloc[0]
+            chain_end_frame = chain_group['frame_end'].max()
+
+            if chain_success == 1:
+                conceded_xT_map[chain_id] = 0.0
+                generated_xT_map[chain_id] = 0.0
+                pressing_team_id = chain_group['team_id'].iloc[0] if 'team_id' in chain_group.columns else None
+
+                if pressing_team_id is not None and has_targeted_xthreat:
+                    next_poss = dynamic_df[
+                        (dynamic_df['event_type'] == 'player_possession') &
+                        (dynamic_df['team_id'] == pressing_team_id) &
+                        (dynamic_df['frame_start'] > chain_end_frame) &
+                        (dynamic_df['frame_start'] <= chain_end_frame + 50)
+                    ].sort_values('frame_start')
+
+                    if not next_poss.empty:
+                        raw_xt = next_poss.iloc[0]['player_targeted_xthreat']
+                        generated_xT_map[chain_id] = float(raw_xt) if pd.notna(raw_xt) else 0.0
+            else:
+                generated_xT_map[chain_id] = 0.0
+                if has_xthreat:
                     phase_idx = chain_group['phase_index'].iloc[0]
-                    chain_end_frame = chain_group['frame_end'].max()
                     phase_events = dynamic_df[dynamic_df['phase_index'] == phase_idx]
                     poss_team = phase_events[phase_events['event_type'] == 'player_possession']['team_id'].mode()
                     if not poss_team.empty:
                         poss_team_id = poss_team.iloc[0]
                         next_poss = phase_events[
-                            (phase_events['event_type'] == 'player_possession') & 
-                            (phase_events['team_id'] == poss_team_id) & 
+                            (phase_events['event_type'] == 'player_possession') &
+                            (phase_events['team_id'] == poss_team_id) &
                             (phase_events['frame_start'] >= chain_end_frame)
                         ].sort_values('frame_start')
                         
@@ -620,19 +648,25 @@ class MatchProcessor:
                             receiver_id = next_poss.iloc[0]['player_id']
                             recv_frame = next_poss.iloc[0]['frame_start']
                             xT_events = phase_events[
-                                (phase_events['player_id'] == receiver_id) & 
-                                (phase_events['event_type'].isin(['passing_option', 'off_ball_run'])) & 
+                                (phase_events['player_id'] == receiver_id) &
+                                (phase_events['event_type'].isin(['passing_option', 'off_ball_run'])) &
                                 (phase_events['frame_end'] <= recv_frame + 20)
                             ].sort_values('frame_end', ascending=False)
                             
                             if not xT_events.empty:
                                 raw_xt = xT_events.iloc[0]['xthreat']
                                 conceded_xT_map[chain_id] = float(raw_xt) if pd.notna(raw_xt) else 0.0
-                            else: conceded_xT_map[chain_id] = 0.0
-                        else: conceded_xT_map[chain_id] = 0.0
-                    else: conceded_xT_map[chain_id] = 0.0
+                            else:
+                                conceded_xT_map[chain_id] = 0.0
+                        else:
+                            conceded_xT_map[chain_id] = 0.0
+                    else:
+                        conceded_xT_map[chain_id] = 0.0
+                else:
+                    conceded_xT_map[chain_id] = 0.0
         
         engagement_data['conceded_xT'] = engagement_data['pressing_chain_index'].map(conceded_xT_map).fillna(0.0)
+        engagement_data['generated_xT'] = engagement_data['pressing_chain_index'].map(generated_xT_map).fillna(0.0)
 
         chain_df, player_chain_map, eng_with_features = ChainFeatureEngine.calculate_base_features(
             engagement_data,
@@ -701,17 +735,52 @@ class TurnoverModel:
         self.optimal_threshold = thresholds[best_f1_idx]
         
         y_pred = (y_probs >= self.optimal_threshold).astype(int)
+        cm = confusion_matrix(y_test, y_pred)
+
+        pr_auc = auc(recall, precision)
+        fpr, tpr, roc_thresholds = roc_curve(y_test, y_probs)
+        roc_auc = auc(fpr, tpr)
+
+        prob_true, prob_pred = calibration_curve(y_test, y_probs, n_bins=10, strategy='uniform')
+        calibration_error = float(np.mean(np.abs(prob_true - prob_pred))) if len(prob_true) > 0 else 0.0
+
+        # Weighted ECE over fixed bins: sum_k (n_k / N) * |acc_k - conf_k|
+        y_true_arr = np.asarray(y_test, dtype=np.float64)
+        prob_arr = np.asarray(y_probs, dtype=np.float64)
+        bin_edges = np.linspace(0.0, 1.0, 11)
+        bin_ids = np.digitize(prob_arr, bin_edges[1:-1], right=True)
+        weighted_ece = 0.0
+        total_n = len(prob_arr)
+        for b in range(10):
+            in_bin = (bin_ids == b)
+            n_bin = int(in_bin.sum())
+            if n_bin == 0:
+                continue
+            acc_bin = y_true_arr[in_bin].mean()
+            conf_bin = prob_arr[in_bin].mean()
+            weighted_ece += (n_bin / total_n) * abs(acc_bin - conf_bin)
+        brier_score = float(np.mean((prob_arr - y_true_arr) ** 2))
+
+        baseline_pr = y_test.mean()
+        improvement = ((pr_auc / baseline_pr) - 1) * 100 if baseline_pr > 0 else 0.0
+        optimal_threshold = self.optimal_threshold
         
         print(f"   ⚙️  Using optimal threshold: {self.optimal_threshold:.4f} (Best F1)")
         print("\nCLASSIFICATION REPORT")
         print(classification_report(y_test, y_pred, target_names=['No Turnover', 'Turnover']))
-        
-        pr_auc = auc(recall, precision)
+
+        print(f"\n📈 Model Performance Summary:")
+        print(f"   ROC AUC: {roc_auc:.3f}")
         print(f"   PR AUC: {pr_auc:.3f}")
+        print(f"   Mean Calibration Error: {calibration_error:.4f}")
+        print(f"   Weighted ECE: {weighted_ece:.4f}")
+        print(f"   Brier Score: {brier_score:.4f}")
+        print(f"   Expected Turnovers (Test): {y_probs.sum():.1f} | Actual: {y_test.sum()}")
+        print(f"   Baseline PR (random): {baseline_pr:.3f}")
+        print(f"   Improvement: {improvement:.1f}% over baseline")
+        print(f"\n   Threshold: {optimal_threshold:.4f} | TP={cm[1,1]} | FP={cm[0,1]} | FN={cm[1,0]} | TN={cm[0,0]}")
         
         # Plot ROC and PR curves
-        fpr, tpr, roc_thresholds = roc_curve(y_test, y_probs)
-        roc_auc = auc(fpr, tpr)
         
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
         
@@ -727,13 +796,15 @@ class TurnoverModel:
         ax1.grid(alpha=0.3)
         
         # PR Curve
+        baseline = y_test.mean()
         ax2.plot(recall, precision, color='green', lw=2, label=f'PR curve (AUC = {pr_auc:.3f})')
+        ax2.axhline(y=baseline, color='gray', lw=1, linestyle='--', label=f'Baseline = {baseline:.3f}')
         ax2.set_xlim([0.0, 1.0])
         ax2.set_ylim([0.0, 1.05])
         ax2.set_xlabel('Recall')
         ax2.set_ylabel('Precision')
         ax2.set_title('Precision-Recall Curve')
-        ax2.legend(loc="lower left")
+        ax2.legend(loc="upper right")
         ax2.grid(alpha=0.3)
         
         plt.tight_layout()
@@ -753,6 +824,27 @@ class TurnoverModel:
         print(f"   Computing SHAP values for {sample_size} test samples...")
         explainer = shap.TreeExplainer(base_estimator)
         shap_values = explainer.shap_values(X_shap_sample)
+
+        # This block prints out the EXACT shapley values for feature importances
+        if isinstance(shap_values, list):
+            shap_values_matrix = shap_values[1]
+        else:
+            shap_values_matrix = shap_values
+
+        shap_importance_df = pd.DataFrame({
+            'feature': X_shap_sample.columns,
+            'mean_abs_shap': np.abs(shap_values_matrix).mean(axis=0),
+            'mean_shap': shap_values_matrix.mean(axis=0),
+            'std_abs_shap': np.abs(shap_values_matrix).std(axis=0)
+        }).sort_values('mean_abs_shap', ascending=False).reset_index(drop=True)
+
+        self.shap_importance_df = shap_importance_df
+        shap_importance_path = CONFIG.OUTPUT_DIR / "shap_feature_importance.csv"
+        shap_importance_df.to_csv(shap_importance_path, index=False)
+
+        print("\n📋 Exact mean absolute SHAP values used for the bar chart:")
+        print(shap_importance_df.to_string(index=False, float_format=lambda x: f"{x:.8f}"))
+        print(f"\n💾 SHAP importance table saved to: {shap_importance_path}")
         
         # Summary Plot
         print("   Generating SHAP summary plot...")
@@ -774,6 +866,8 @@ class TurnoverModel:
                           show=False)
         plt.title('Mean Absolute SHAP Values\n(Average feature contribution magnitude)', 
                   fontsize=14, fontweight='bold', pad=20)
+        ax = plt.gca()
+        ax.set_xlabel("Mean |SHAP| value (average impact on model output)", fontsize=11)
         plt.tight_layout()
         plt.show()
         
@@ -823,6 +917,8 @@ class TurnoverModel:
         print("   • Waterfall: Shows how individual features add up to final prediction")
         print("   • Dependence: Shows relationship between feature value and its SHAP impact")
 
+        return shap_importance_df
+
 # %%
 # ==========================================
 # 4. COUNTERFACTUAL SHAPLEY ATTRIBUTION (BATCH INFERENCE)
@@ -864,7 +960,9 @@ class ShapleyAttributionEngine:
                     'xTurnover_full': chain_row['xTurnover_full'], 'xTurnover_without_player': 0.0,
                     'raw_shapley_value': chain_row['xTurnover_full'],
                     'marginal_xTurnover': chain_row['xTurnover_full'], 'chain_success': chain_row['chain_success'],
-                    'conceded_xT': chain_row.get('conceded_xT', 0.0), 'chain_size': 1, 'temporal_weight': 1.0
+                    'conceded_xT': chain_row.get('conceded_xT', 0.0),
+                    'generated_xT': chain_row.get('generated_xT', 0.0),
+                    'chain_size': 1, 'temporal_weight': 1.0
                 })
                 continue
                 
@@ -882,7 +980,7 @@ class ShapleyAttributionEngine:
         v_S = {}
         if subset_features_list:
             print("\n🔮 Running batch predict_proba() horizontally...")
-            batch_df = pd.DataFrame(subset_features_list)[feature_cols].fillna(0)
+            batch_df = pd.DataFrame(subset_features_list).reindex(columns=feature_cols, fill_value=0).fillna(0)
             batch_probs = model.predict_proba(batch_df)[:, 1]
             
             for (g_id, sub_tuple), prob in zip(subset_mapping, batch_probs):
@@ -938,6 +1036,7 @@ class ShapleyAttributionEngine:
                     'xTurnover_full': xTurnover_full, 'xTurnover_without_player': xT_without,
                     'raw_shapley_value': shapley_value, 'marginal_xTurnover': max(0.0, shapley_value),
                     'chain_success': chain_row['chain_success'], 'conceded_xT': chain_row.get('conceded_xT', 0.0),
+                    'generated_xT': chain_row.get('generated_xT', 0.0),
                     'chain_size': N, 'temporal_weight': temporal_weight
                 })
                 
@@ -974,6 +1073,7 @@ class ShapleyAttributionEngine:
         out_df['attributed_xTurnover'] = out_df['contribution_share'] * out_df['xTurnover_full']
         out_df['attributed_turnover']  = out_df['chain_success'] * out_df['contribution_share']
         out_df['defensive_penalty'] = out_df['contribution_share'] * (1 - out_df['xTurnover_full']) * out_df['conceded_xT']
+        out_df['attacking_reward'] = out_df['attributed_xTurnover'] * out_df['generated_xT']
         
         # Lock in calibrated column names for ranking consistency
         out_df['marginal_xTurnover_calibrated'] = out_df['attributed_xTurnover']
@@ -1021,8 +1121,13 @@ class MetricsAndExportEngine:
         metrics_df['chains_per_match'] = metrics_df['chains_participated'] / metrics_df['matches_played'].replace(0, 1)
         metrics_df['xTurnover_per_chain'] = metrics_df['total_marginal_xTurnover_calibrated'] / metrics_df['chains_participated'].replace(0, 1)
         metrics_df['defensive_penalty_per_chain'] = metrics_df['defensive_penalty'] / metrics_df['chains_participated'].replace(0, 1)
+        metrics_df['defensive_penalty_per_100_chains'] = metrics_df['defensive_penalty_per_chain'] * 100.0
         
         metrics_df['defensive_penalty_per_90'] = metrics_df['defensive_penalty'] * per_90_factor
+        metrics_df['xT_generated_per_100_chains'] = (
+            metrics_df['attacking_reward'] / metrics_df['chains_participated'].replace(0, 1)
+        ) * 100.0
+        metrics_df['xT_generated_per_90'] = metrics_df['attacking_reward'] * per_90_factor
         metrics_df['net_defensive_value_per_90'] = (metrics_df['total_marginal_xTurnover_calibrated'] - metrics_df['defensive_penalty']) * per_90_factor
         metrics_df['attributed_turnovers_per_90'] = metrics_df['attributed_turnovers'] * per_90_factor
         metrics_df['value_added'] = metrics_df['attributed_turnovers'] - metrics_df['total_marginal_xTurnover_calibrated']
@@ -1041,7 +1146,8 @@ class MetricsAndExportEngine:
             coordinated_chains=('global_chain_id', 'count'),
             coordinated_xTurnover_total=('marginal_xTurnover_calibrated', 'sum'),
             coordinated_attributed=('attributed_turnover', 'sum'),
-            avg_contribution_share=('contribution_share', 'mean')
+            avg_contribution_share_coord=('contribution_share', 'mean'),
+            median_contribution_share_coord=('contribution_share', 'median')
         )
         metrics_df = metrics_df.join(solo_stats).join(coord_stats).fillna(0)
         
@@ -1051,6 +1157,7 @@ class MetricsAndExportEngine:
 
         # Dominance
         dominance_stats = marginal_df.groupby('player_id').agg(
+            avg_contribution_share=('contribution_share', 'mean'),
             median_contribution_share=('contribution_share', 'median')
         )
         metrics_df = metrics_df.join(dominance_stats)
@@ -1111,11 +1218,12 @@ class MetricsAndExportEngine:
             "Player Rankings": ['player_id', 'player_name', 'chains_participated', 'total_marginal_xTurnover_calibrated', 'total_defensive_penalty', 'attributed_turnovers', 'avg_chain_size', 'minutes_played', 'matches_played', 'team_name', 'xTurnover_per_90', 'defensive_penalty_per_90', 'net_defensive_value_per_90', 'attributed_turnovers_per_90', 'value_added', 'value_added_per_90'],
             "All Sub-Metrics": [c for c in sub_ranked_df.columns],
             "Activity": id_cols + ['xTurnover_per_90', 'chains_participated', 'chains_per_90', 'chains_per_match', 'avg_chain_size'],
-            "Efficiency": id_cols + ['xTurnover_per_90', 'xTurnover_per_chain', 'defensive_penalty_per_chain', 'chains_per_90', 'avg_chain_size'],
+            "Efficiency": id_cols + ['xTurnover_per_90', 'xTurnover_per_chain', 'defensive_penalty_per_100_chains', 'chains_per_90', 'avg_chain_size'],
+            "Attacking Impact": id_cols + ['chains_participated', 'attacking_reward', 'xT_generated_per_90', 'xT_generated_per_100_chains'],
             "Solo vs Coordinated": id_cols + ['xTurnover_per_90', 'solo_xTurnover_per_90', 'coordinated_xTurnover_per_90', 'solo_xTurnover_ratio', 'solo_chains', 'coordinated_chains', 'solo_xTurnover_total', 'coordinated_xTurnover_total'],
-            "Dominance & Chain Quality": id_cols + ['xTurnover_per_90', 'avg_contribution_share', 'median_contribution_share', 'avg_chain_xTurnover_full', 'max_chain_xTurnover_full', 'std_chain_xTurnover_full'],
+            "Dominance & Chain Quality": id_cols + ['xTurnover_per_90', 'avg_contribution_share', 'avg_contribution_share_coord', 'median_contribution_share', 'median_contribution_share_coord', 'avg_chain_xTurnover_full', 'max_chain_xTurnover_full', 'std_chain_xTurnover_full'],
             "Conversion & Consistency": id_cols + ['xTurnover_per_90', 'xTurnover_conversion_rate', 'attributed_turnovers', 'total_marginal_xTurnover_calibrated', 'xTurnover_per_match_mean', 'xTurnover_per_match_std', 'xTurnover_cv'],
-            "Negative Impact": id_cols + ['xTurnover_per_90', 'negative_chains', 'total_negative_impact', 'net_defensive_value_per_90', 'defensive_penalty_per_chain', 'avg_negative_impact', 'negative_impact_per_chain', 'pressing_risk']
+            "Negative Impact": id_cols + ['xTurnover_per_90', 'negative_chains', 'total_negative_impact', 'net_defensive_value_per_90', 'defensive_penalty_per_100_chains', 'avg_negative_impact', 'negative_impact_per_chain', 'pressing_risk']
         }
         
         with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
@@ -1222,12 +1330,30 @@ if __name__ == "__main__":
             pickle.dump(cache_data, f)
         print("✅ Cache saved successfully!")
 
-    print(f"\n📊 Dataset Statistics:")
-    print(f"   Total Chains: {len(master_chain_df):,}")
-    print(f"   Total Engagements: {len(master_engagement_df):,}")
+    total_chains = len(master_chain_df)
+    total_engagements = len(master_engagement_df)
+    chain_success_rate = master_chain_df['chain_success'].mean() if total_chains > 0 else 0.0
 
-    if 'chain_max_radial_velocity' not in master_chain_df.columns:
-        print("❌ Missing 'chain_max_radial_velocity' in chain features.")
+    feature_rename_map = {
+        'mean_dist_to_goal': 'distance_to_goal',
+        'chain_proximity_to_sideline': 'proximity_to_sideline',
+        'chain_length': 'possession_chain_length',
+        'chain_max_radial_velocity': 'max_radial_velocity',
+        'mean_delta_n_passing_options': 'delta_n_passing_options',
+        'chain_mean_LNS': 'local_numerical_superiority',
+        'chain_mean_defensive_proximity': 'defensive_proximity',
+    }
+    master_chain_df = master_chain_df.rename(columns=feature_rename_map)
+
+    print(f"\n📊 Dataset Statistics:")
+    print(f"   Total Chains: {total_chains:,}")
+    print(f"   Total Engagements: {total_engagements:,}")
+    print(f"   Avg Engagements per Chain: {total_engagements / total_chains if total_chains > 0 else 0.0:.2f}")
+    print(f"   Chains with Turnover: {master_chain_df['chain_success'].sum():,} ({100 * chain_success_rate:.2f}%)")
+    print(f"   Chains without Turnover: {(~master_chain_df['chain_success'].astype(bool)).sum():,} ({100 * (1 - chain_success_rate):.2f}%)")
+
+    if 'max_radial_velocity' not in master_chain_df.columns:
+        print("❌ Missing 'max_radial_velocity' in chain features.")
         print("   Delete pipeline_cache/preprocessing_cache.pkl and rerun the pipeline to rebuild with radial physics.")
         sys.exit(1)
     
@@ -1239,18 +1365,19 @@ if __name__ == "__main__":
                     'game_state', 'third_start', 
                     'engagement_density',
                     'is_coordinated_press', 
-                    #'chain_size',
+                    'chain_size',
+                    'generated_xT',
                     #'chain_duration',
                     'chain_mean_y',
-                    #'chain_max_radial_velocity',
-                    #'mean_dist_to_goal',
+                    #'max_radial_velocity',
+                    #'distance_to_goal',
                     #'forward_pressing_ratio',
                     #'defensive_line_height',
-                    #'mean_delta_n_passing_options',
-                    #'chain_length_sc',
-                    #'chain_mean_LNS',
-                    #'chain_mean_defensive_proximity',
-                    #'chain_proximity_to_sideline'
+                    #'delta_n_passing_options',
+                    #'possession_chain_length',
+                    #'local_numerical_superiority',
+                    #'defensive_proximity',
+                    #'proximity_to_sideline'
                     ]
                     
     feature_cols = [c for c in master_chain_df.columns if c not in exclude_cols]
@@ -1260,7 +1387,14 @@ if __name__ == "__main__":
     for f in feature_cols:
         print(f"   - {f}")
 
+    # 1. Fill NAs for feature columns in the main dataframe
     master_chain_df[feature_cols] = master_chain_df[feature_cols].fillna(0)
+
+    # 2. Create the exact DataFrame you requested (Identifier + Features + Target)
+    # This fulfills your requirement without breaking the rest of the pipeline
+    model_prep_df = master_chain_df[['global_chain_id'] + feature_cols + ['chain_success']].copy().head(10)
+
+    # 3. Set up X and y for training directly from the master dataframe
     X = master_chain_df[feature_cols]
     y = master_chain_df['chain_success']
 
@@ -1347,6 +1481,7 @@ if __name__ == "__main__":
         total_marginal_xTurnover_calibrated=('marginal_xTurnover_calibrated', 'sum'),
         attributed_turnovers=('attributed_turnover', 'sum'),
         defensive_penalty=('defensive_penalty', 'sum'),
+        attacking_reward=('attacking_reward', 'sum'),
         chains_participated=('global_chain_id', 'nunique'),
         avg_chain_size=('chain_size', 'mean')
     ).reset_index()

@@ -20,16 +20,17 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.patches import FancyArrowPatch
+from matplotlib.patches import FancyArrowPatch, Circle
 from mplsoccer import Pitch
 from scipy.stats import percentileofscore
 from PIL import Image
 import json
+import base64
 import os
 import glob
 import io
 import warnings
-import base64
+import re
 
 warnings.filterwarnings("ignore")
 
@@ -75,98 +76,15 @@ DYNAMIC_DIR = ROOT_DIR / "dynamic"
 META_DIR = ROOT_DIR / "meta"
 
 # =====================================================================
-# AJAX THEME
+# THEME (DEFAULT STREAMLIT LOOK)
 # =====================================================================
-AJAX_RED = "#D2122E"
-AJAX_BLACK = "#1A1A2E"
-AJAX_WHITE = "#FAFAFA"
-AJAX_GOLD = "#C5A258"
-AJAX_DARK_BG = "#0F0F1A"
-AJAX_CARD_BG = "#16213E"
+DEFAULT_BG = "#FFFFFF"
+DEFAULT_TEXT = "#000000"
 
 # =====================================================================
 # PAGE CONFIG
 # =====================================================================
-# Your custom base64 icon
-ICON_B64 = "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"
-icon_bytes = base64.b64decode(ICON_B64)
-custom_icon = Image.open(io.BytesIO(icon_bytes))
-
-st.set_page_config(
-    page_title="xTO Tactical Dashboard",
-    page_icon=custom_icon,
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
-
-# Inject Ajax-themed CSS
-st.markdown(f"""
-<style>
-    /* Main background */
-    .stApp {{
-        background-color: {AJAX_DARK_BG};
-        color: {AJAX_WHITE};
-    }}
-    /* Sidebar */
-    section[data-testid="stSidebar"] {{
-        background-color: {AJAX_CARD_BG};
-    }}
-    /* Tabs */
-    .stTabs [data-baseweb="tab-list"] {{
-        gap: 8px;
-    }}
-    .stTabs [data-baseweb="tab"] {{
-        background-color: {AJAX_CARD_BG};
-        color: {AJAX_WHITE};
-        border-radius: 6px 6px 0 0;
-        padding: 10px 24px;
-        font-weight: 600;
-    }}
-    .stTabs [aria-selected="true"] {{
-        background-color: {AJAX_RED};
-        color: white;
-    }}
-    /* Metric cards */
-    [data-testid="stMetric"] {{
-        background-color: {AJAX_CARD_BG};
-        border: 1px solid {AJAX_RED}33;
-        border-radius: 8px;
-        padding: 12px 16px;
-    }}
-    [data-testid="stMetricLabel"] {{
-        color: {AJAX_GOLD};
-    }}
-    [data-testid="stMetricValue"] {{
-        color: {AJAX_WHITE};
-    }}
-    /* Selectboxes */
-    .stSelectbox label, .stMultiSelect label {{
-        color: {AJAX_GOLD} !important;
-        font-weight: 600;
-    }}
-    /* Buttons */
-    .stButton > button {{
-        background-color: {AJAX_RED};
-        color: white;
-        font-weight: 700;
-        border: none;
-        border-radius: 6px;
-        padding: 0.5rem 2rem;
-    }}
-    .stButton > button:hover {{
-        background-color: #B01025;
-        color: white;
-    }}
-    /* Headers */
-    h1, h2, h3 {{
-        color: {AJAX_WHITE} !important;
-    }}
-    /* Dividers */
-    hr {{
-        border-color: {AJAX_RED}44;
-    }}
-</style>
-""", unsafe_allow_html=True)
+st.set_page_config(page_title="xTO Tactical Dashboard", layout="wide")
 
 
 # =====================================================================
@@ -270,6 +188,8 @@ def load_match_meta(match_id: str):
 MAX_SPEED_VIS = 7.0
 BUFFER_FRAMES = 25
 GIF_FPS = 10
+RING_RADIUS = 1.8
+RING_TAIL_FRAMES = 5
 
 
 def _hex_to_rgb(hex_color: str) -> tuple[float, float, float]:
@@ -340,6 +260,14 @@ def generate_chain_gif(chain_players_df, tracking_df, dynamic_df, meta,
     
     if chain_events.empty:
         return None
+
+    engagement_windows = (
+        chain_events[["player_id", "frame_start", "frame_end"]]
+        .dropna()
+        .astype({"player_id": int, "frame_start": int, "frame_end": int})
+        .itertuples(index=False, name=None)
+    )
+    engagement_windows = list(engagement_windows)
 
     # 2. Get exact start of first action and end of last action
     first_start = int(chain_events["frame_start"].min())
@@ -418,8 +346,8 @@ def generate_chain_gif(chain_players_df, tracking_df, dynamic_df, meta,
         _pid = int(_pid)
         is_p = _pid in player_marginal
         if pressing_team is not None and pd.notna(_tid) and int(_tid) == pressing_team:
-            # Chain players get a larger dot; colour is always the team kit
-            sz = 650 if is_p else 450
+            # Chain players are distinguished by circumference color; size is uniform.
+            sz = 450
             color, edge, txt_c = pressing_kit["fill"], "white" if is_p else "black", pressing_kit["number"]
         else:
             color, edge, txt_c, sz = opp_kit["fill"], "black", opp_kit["number"], 450
@@ -446,7 +374,7 @@ def generate_chain_gif(chain_players_df, tracking_df, dynamic_df, meta,
 
     legend_els = [
         plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=pressing_kit["fill"],
-                   markersize=13, markeredgecolor="white", markeredgewidth=1.5,
+                   markersize=9, markeredgecolor="white", markeredgewidth=1.5,
                    label="Chain Player(s)"),
         plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=pressing_kit["fill"],
                    markersize=9, markeredgecolor="black", markeredgewidth=1,
@@ -492,11 +420,11 @@ def generate_chain_gif(chain_players_df, tracking_df, dynamic_df, meta,
                 _tid = row.get("team_id")
                 if pressing_team is not None and pd.notna(_tid) and int(_tid) == pressing_team:
                     is_p = pid in player_marginal
-                    sz = 650 if is_p else 450
+                    sz = 450
                     edge = "white" if is_p else "black"
                     cat = (pressing_kit["fill"], edge, pressing_kit["number"], sz)
                 else:
-                    cat = (opp_kit["fill"], "black", opp_kit["number"], 500)
+                    cat = (opp_kit["fill"], "black", opp_kit["number"], 450)
                 player_cat[pid] = cat
             color, edge, txt_c, sz = cat
             key = (color, edge, sz)
@@ -514,6 +442,25 @@ def generate_chain_gif(chain_players_df, tracking_df, dynamic_df, meta,
         for (color, edge, sz), arrays in cat_arrays.items():
             _dyn.append(ax.scatter(arrays["x"], arrays["y"], s=sz, c=color,
                                    edgecolors=edge, linewidths=2, zorder=5, alpha=1.0))
+
+        # Highlight active engagements with a dotted green ring (1s tail after engagement ends).
+        active_pids = {
+            pid for pid, start, end in engagement_windows
+            if start <= frame_num <= end + RING_TAIL_FRAMES
+        }
+        for px, py, pid, txt_c, mxt, is_presser, vx, vy in per_player:
+            if pid in active_pids:
+                ring = Circle(
+                    (px, py),
+                    RING_RADIUS,
+                    fill=False,
+                    edgecolor="#00FF00",
+                    linewidth=2,
+                    linestyle="--",
+                    zorder=6,
+                )
+                ax.add_patch(ring)
+                _dyn.append(ring)
 
         # Per-player jersey number + xTO label (text must be per-item)
         for px, py, pid, txt_c, mxt, is_presser, vx, vy in per_player:
@@ -562,6 +509,26 @@ def generate_chain_gif(chain_players_df, tracking_df, dynamic_df, meta,
         ax.set_title(f"xTO: {xT_pred:.3f}  |  {outcome}  |  {ts}",
                      fontsize=16, fontweight="bold", color="white", pad=14)
 
+        # Status bar (mirrors risk/reward scripts)
+        status_switch_frame = last_end + 20
+        if frame_num < first_start:
+            status_txt, status_color = "PRE-PRESS", "#AAAAAA"
+        elif frame_num <= last_end:
+            status_txt, status_color = "PRESS ACTIVE", "#FFA500"
+        else:
+            if chain_success == 1:
+                status_txt, status_color = "PRESS WON", "#2E8B57"
+            else:
+                status_txt, status_color = "PRESS FAILED", "#FF4444"
+
+        _dyn.append(ax.text(
+            0.5, 0.95, f"STATUS: {status_txt}", transform=ax.transAxes,
+            fontsize=14, fontweight="bold", color=status_color,
+            ha="center", va="top", zorder=10,
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="#1a1a1a",
+                      edgecolor=status_color, linewidth=2, alpha=0.8),
+        ))
+
         _dyn.append(ax.legend(handles=legend_els, loc="upper left", fontsize=8,
                               framealpha=0.2, labelcolor="white", facecolor="black"))
 
@@ -604,17 +571,19 @@ def generate_chain_gif(chain_players_df, tracking_df, dynamic_df, meta,
 
 
 # =====================================================================
-# RADAR CHART HELPER  (ported from slide2_pressing_efficiency_dominance)
+# RADAR CHART HELPER  
 # =====================================================================
 PILLARS = [
     ("chains_per_90",          "Volume\n(Chains/90)"),
     ("xTurnover_per_chain",          "Efficiency\n(xTO/Chain)"),
-    ("solo_xTurnover_ratio",         "Self-Sufficiency\n(Solo Ratio)"),
-    ("avg_contribution_share", "Dominance\n(Contribution %)"),
-    ("avg_chain_xTurnover_full",      "Tactical IQ\n(Chain Danger)"),
-    ("negative_impact_per_chain",    "Shape Discipline\n(Negative xTO/Chain)"),
-    ("pressing_risk",    "Pressing Risk Ratio\n(xT conceded per 1000 xTO, chain-based)"),
-    #("defensive_penalty_per_90", "Pressing Risk\n(Defensive Penalty/90)"),
+    ("xTurnover_per_90",             "Quality\n(xTO/90)"),
+    #("solo_xTurnover_ratio",         "Self-Sufficiency\n(Solo xTO / Total xTO)"),
+    ("median_contribution_share_coord", "Dominance\n(Median \nmarginal xTO / Chain xTO)"),
+    ("avg_chain_xTurnover_full",      "Tactical IQ\n(Avg full-chain xTO)"),
+    #("negative_impact_per_chain",    "Shape Discipline\n(Negative xTO/Chain)"),
+    #("pressing_risk",    "Pressing Risk-Reward Ratio\n(xT conceded/xTO)"),
+    ("defensive_penalty_per_100_chains", "Exposure Penalty\n(xT conceded per 100 Chains)"),
+    ("xT_generated_per_100_chains", "Attacking Reward\n(xT generated per 100 Chains)"),
 ]
 N_PILLARS = len(PILLARS)
 ANGLES = np.linspace(0, 2 * np.pi, N_PILLARS, endpoint=False).tolist()
@@ -630,12 +599,12 @@ def _draw_radar(ax, values, color, label, alpha_fill=0.20):
 
 def _style_radar(ax, title, title_color):
     # 1. Match the dark background of the app
-    ax.set_facecolor(AJAX_DARK_BG)  
+    ax.set_facecolor(DEFAULT_BG)
     ax.set_ylim(0, 105)
     ax.set_xticks(ANGLES)
     
     # 2. Change text color to white so it's visible on the dark background
-    ax.set_xticklabels([p[1] for p in PILLARS], fontsize=6, fontweight="bold", color=AJAX_WHITE)
+    ax.set_xticklabels([p[1] for p in PILLARS], fontsize=6, fontweight="bold", color=DEFAULT_TEXT)
     ax.tick_params(axis='x', pad=8)
     
     ax.set_yticks([25, 50, 75, 100])
@@ -663,7 +632,7 @@ def build_radar_figure(players_info, peer_df):
     pillar_cols = [p[0] for p in PILLARS]
 
     # 1. Define which metrics need to be inverted (Lower = Better)
-    lower_is_better = ["pressing_risk"]
+    lower_is_better = ["pressing_risk", "defensive_penalty_per_100_chains"]
 
     def pct_vals(row):
         out = []
@@ -680,8 +649,8 @@ def build_radar_figure(players_info, peer_df):
             out.append(pct)
         return out
 
-    fig = plt.figure(figsize=(5.5, 4.8), dpi=90)
-    fig.patch.set_facecolor(AJAX_DARK_BG)
+    fig = plt.figure(figsize=(5.04, 4.32), dpi=90)
+    fig.patch.set_facecolor(DEFAULT_BG)
 
     ax = fig.add_subplot(111, projection="polar")
 
@@ -694,18 +663,17 @@ def build_radar_figure(players_info, peer_df):
         
         _draw_radar(ax, vals, color, name)
         
-        xto = row.get("xTurnover_per_90", 0) if "xTurnover_per_90" in row.index else row.get("marginal_xTurnover_per_90", 0)
         team = row.get("team_name", "")
-        
+
         # create proxy artist for legend
-        line = plt.Line2D([0], [0], color=color, lw=1, label=f"{name} ({xto:.3f} xTO/90, {team})")
+        line = plt.Line2D([0], [0], color=color, lw=1, label=f"{name} ({team})")
         legend_handles.append(line)
 
-    _style_radar(ax, "", AJAX_WHITE)
+    _style_radar(ax, "", DEFAULT_TEXT)
 
     fig.text(0.5, 0.95,
-             f"The {len(PILLARS)} Pillars of Out-of-Possession Impact — Pressing DNA",
-             ha="center", va="top", fontsize=12, fontweight="bold", color=AJAX_WHITE)
+             f"Defensive Metrics Radar Chart",
+             ha="center", va="top", fontsize=12, fontweight="bold", color=DEFAULT_TEXT)
 
     # Create a legend with text colors matching the lines
     leg = ax.legend(handles=legend_handles, loc='upper center', bbox_to_anchor=(0.5, -0.15),
@@ -721,20 +689,9 @@ def build_radar_figure(players_info, peer_df):
 # =====================================================================
 # HEADER
 # =====================================================================
-st.markdown(
-    f"""
-    <div style="display:flex;align-items:center;gap:14px;padding-bottom:6px;">
-        <div style="font-size:42px;font-weight:800;color:{AJAX_RED};letter-spacing:-1px;">
-            xTO Tactical Dashboard
-        </div>
-        <div style="font-size:14px;color:#888;padding-top:12px;">
-            Ajax Defensive Metrics &mdash; SkillCorner 2024
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-st.markdown("---")
+st.title("xTO Tactical Dashboard")
+st.caption("Premier League 2024/25")
+st.divider()
 
 # =====================================================================
 # LOAD ALL DATA
@@ -794,110 +751,157 @@ with tab_film:
 
         match_labels = build_match_labels(tuple(available_matches))
 
-        col_match, col_chain = st.columns([1, 1])
+        col_filters, col_content = st.columns([1, 3], gap="large")
 
-        with col_match:
+        with col_filters:
+            st.markdown("##### Filters")
             selected_label = st.selectbox(
                 "Match",
                 options=available_matches,
                 format_func=lambda x: match_labels.get(x, x),
             )
-        selected_match = selected_label
+            selected_match = selected_label
 
-        # Chains for this match
-        match_shapley = shapley_df[shapley_df["match_id"] == selected_match]
-        chain_ids = match_shapley["global_chain_id"].unique().tolist()
+            # Chains for this match
+            match_shapley = shapley_df[shapley_df["match_id"] == selected_match]
+            chain_ids = match_shapley["global_chain_id"].unique().tolist()
 
-        # Build chain display labels with xTO and size
-        chain_summaries = (
-            match_shapley.groupby("global_chain_id")
-            .agg(
-                pressing_chain_index=("pressing_chain_index", "first"),
-                xTO=("xTurnover_full_calibrated", "first"),
-                success=("chain_success", "first"),
-                size=("chain_size", "first"),
+            # Build chain display labels with xTO and size
+            chain_summaries = (
+                match_shapley.groupby("global_chain_id")
+                .agg(
+                    pressing_chain_index=("pressing_chain_index", "first"),
+                    xTO=("xTurnover_full_calibrated", "first"),
+                    success=("chain_success", "first"),
+                    size=("chain_size", "first"),
+                )
+                .sort_values("xTO", ascending=False)
             )
-            .sort_values("xTO", ascending=False)
-        )
 
-        chain_options = chain_summaries.index.tolist()
-        chain_label_map = {}
-        for cid in chain_options:
-            r = chain_summaries.loc[cid]
-            outcome = "✓" if r["success"] == 1 else "✗"
-            orig_cid = r["pressing_chain_index"]
-            chain_label_map[cid] = f"Chain {orig_cid}  |  xTO: {r['xTO']:.3f}  |  {int(r['size'])}P  |  {outcome}"
+            chain_options = chain_summaries.index.tolist()
+            chain_label_map = {}
+            for cid in chain_options:
+                r = chain_summaries.loc[cid]
+                outcome = "✓" if r["success"] == 1 else "✗"
+                orig_cid = r["pressing_chain_index"]
+                chain_label_map[cid] = f"Chain {orig_cid}  |  xTO: {r['xTO']:.3f}  |  {int(r['size'])}P  |  {outcome}"
 
-        with col_chain:
             selected_chain = st.selectbox(
                 "Pressing Chain (sorted by xTO ↓)",
                 options=chain_options,
                 format_func=lambda x: chain_label_map.get(x, x),
             )
 
-        # Chain summary metrics
-        if selected_chain:
-            meta = load_match_meta(selected_match)
-            player_jerseys = {}
-            if meta:
-                for p in meta.get("players", []):
-                    if p.get("number") is not None:
-                        player_jerseys[int(p["id"])] = str(p["number"])
+        with col_content:
+            # Chain summary metrics
+            if selected_chain:
+                meta = load_match_meta(selected_match)
+                player_jerseys = {}
+                if meta:
+                    for p in meta.get("players", []):
+                        if p.get("number") is not None:
+                            player_jerseys[int(p["id"])] = str(p["number"])
 
-            chain_row = chain_summaries.loc[selected_chain]
-            chain_players = match_shapley[match_shapley["global_chain_id"] == selected_chain].copy()
-            chain_players["jersey"] = chain_players["player_id"].astype(int).map(player_jerseys).fillna("-")
+                chain_row = chain_summaries.loc[selected_chain]
+                chain_players = match_shapley[match_shapley["global_chain_id"] == selected_chain].copy()
+                chain_players["jersey"] = chain_players["player_id"].astype(int).map(player_jerseys).fillna("-")
 
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("xTO (Model Prediction)", f"{chain_row['xTO']:.4f}")
-            c2.metric("Outcome", "TURNOVER" if chain_row["success"] == 1 else "No Turnover")
-            c3.metric("Chain Size", f"{int(chain_row['size'])} players")
-            
-            # Defensive Line Height from chains_df if available
-            ch_detail = chains_df[
-                chains_df["global_chain_id"] == selected_chain
-            ]
-            dl_height = ch_detail["defensive_line_height"].iloc[0] * 105.0 if (not ch_detail.empty and "defensive_line_height" in ch_detail.columns) else "—"
-            dl_height = abs(dl_height) if isinstance(dl_height, (float, np.floating)) else dl_height # Guard catch for pre-existing flipped data
-            c4.metric("Def. Line Height", f"{dl_height:.1f} m" if isinstance(dl_height, (float, np.floating)) else dl_height)
+                c1, c2, c3 = st.columns(3)
+                c1.metric("xTO (Model Prediction)", f"{chain_row['xTO']:.4f}")
+                c2.metric("Outcome", "TURNOVER" if chain_row["success"] == 1 else "No Turnover")
+                c3.metric("Chain Size", f"{chain_row['size']}")
 
-            # Player contribution table
-            st.markdown("##### Shapley Marginal Contributions")
-            disp = chain_players[
-                ["jersey", "player_name", "marginal_xTurnover_calibrated", "contribution_share", "temporal_weight"]
-            ].copy()
-            disp.columns = ["No.", "Player", "Marginal xTO", "Share", "Temporal Weight"]
-            disp = disp.sort_values("Marginal xTO", ascending=False).reset_index(drop=True)
-            disp.index += 1
-            disp["Share"] = disp["Share"].apply(lambda v: f"{v * 100:.1f}%")
-            disp["Marginal xTO"] = disp["Marginal xTO"].apply(lambda v: f"{v:.4f}")
-            disp["Temporal Weight"] = disp["Temporal Weight"].apply(lambda v: f"{v:.3f}")
-            st.dataframe(disp, use_container_width=True, height=min(280, 60 + len(disp) * 38))
+                ch_detail = chains_df[
+                    chains_df["global_chain_id"] == selected_chain
+                ]
 
-            # GIF generation
-            st.markdown("---")
-            ds_option = st.radio("Frame quality", ["Fast (every 3rd frame)", "Normal (every 2nd frame)", "Full (all frames)"],
-                                 horizontal=True, index=0)
-            ds_map = {"Fast (every 3rd frame)": 3, "Normal (every 2nd frame)": 2, "Full (all frames)": 1}
-            downsample = ds_map[ds_option]
+                # Chain feature table (11 model features)
+                st.markdown("##### Chain Feature Profile")
+                feature_specs = [
+                    ("distance_to_goal", "Mean Dist to Goal (m)", "{:.2f}", None),
+                    ("defensive_line_height", "Defensive Line Height (m)", "{:.1f}", lambda v: abs(v) * 105.0),
+                    ("chain_duration", "Chain Duration (s)", "{:.2f}", None),
+                    ("proximity_to_sideline", "Proximity to Sideline (m)", "{:.2f}", None),
+                    ("possession_chain_length", "Possession Chain Length", "{:.0f}", None),
+                    ("max_radial_velocity", "Max Radial Closing Velocity (m/s)", "{:.3f}", None),
+                    ("forward_pressing_ratio", "Forward Pressing Ratio", "{:.2f}", None),                   
+                    ("delta_n_passing_options", "Mean Delta Passing Options", "{:.2f}", None),
+                    ("local_numerical_superiority", "Mean LNS", "{:.3f}", None),
+                    ("defensive_proximity", "Mean Defensive Proximity (m)", "{:.3f}", None),                   
+                ]
 
-            if st.button("▶  Generate Visualization", type="primary", use_container_width=True):
-                with st.spinner("Loading match data & rendering frames… This may take 15–60 seconds."):
-                    tracking = load_match_tracking(selected_match)
-                    dynamic = load_match_dynamic(selected_match)
-
-                    if tracking is None or dynamic is None or meta is None:
-                        st.warning(f"Tracking/dynamic/meta data missing for match {selected_match}.")
-                    else:
-                        gif_bytes = generate_chain_gif(
-                            chain_players, tracking, dynamic, meta,
-                            downsample=downsample,
-                        )
-                        if gif_bytes:
-                            st.image(gif_bytes, caption=f"Chain {selected_chain}  |  xTO: {chain_row['xTO']:.3f}",
-                                     use_container_width=True)
+                chain_feature_rows = []
+                if not ch_detail.empty:
+                    ch_row = ch_detail.iloc[0]
+                    for col, label, fmt, transform in feature_specs:
+                        if col not in ch_detail.columns or pd.isna(ch_row.get(col)):
+                            value_str = "—"
                         else:
-                            st.warning("Could not generate GIF — no valid frames found for this chain.")
+                            val = ch_row[col]
+                            if transform is not None:
+                                val = transform(val)
+                            value_str = fmt.format(val)
+                        chain_feature_rows.append({"Feature": label, "Value": value_str})
+                else:
+                    chain_feature_rows = [{"Feature": label, "Value": "—"} for _, label, _, _ in feature_specs]
+
+                st.dataframe(
+                    pd.DataFrame(chain_feature_rows),
+                    use_container_width=True,
+                    hide_index=True,
+                    height=420,
+                )
+
+                # Player contribution table
+                st.markdown("##### Shapley Marginal Contributions")
+                disp = chain_players[
+                    ["jersey", "player_name", "marginal_xTurnover_calibrated", "contribution_share", "temporal_weight"]
+                ].copy()
+                disp.columns = ["No.", "Player", "Marginal xTO", "Share", "Temporal Weight"]
+                disp = disp.sort_values("Marginal xTO", ascending=False).reset_index(drop=True)
+                disp.index += 1
+                disp["Share"] = disp["Share"].apply(lambda v: f"{v * 100:.1f}%")
+                disp["Marginal xTO"] = disp["Marginal xTO"].apply(lambda v: f"{v:.4f}")
+                disp["Temporal Weight"] = disp["Temporal Weight"].apply(lambda v: f"{v:.3f}")
+                st.dataframe(disp, use_container_width=True, height=min(280, 60 + len(disp) * 38))
+
+                # GIF generation
+                st.markdown("---")
+                ds_option = st.radio("Frame quality", ["Fast (every 3rd frame)", "Normal (every 2nd frame)", "Full (all frames)"],
+                                     horizontal=True, index=0)
+                ds_map = {"Fast (every 3rd frame)": 3, "Normal (every 2nd frame)": 2, "Full (all frames)": 1}
+                downsample = ds_map[ds_option]
+
+                if st.button("▶  Generate Visualization", type="primary", use_container_width=True):
+                    with st.spinner("Loading match data & rendering frames… This may take 15–60 seconds."):
+                        tracking = load_match_tracking(selected_match)
+                        dynamic = load_match_dynamic(selected_match)
+
+                        if tracking is None or dynamic is None or meta is None:
+                            st.warning(f"Tracking/dynamic/meta data missing for match {selected_match}.")
+                        else:
+                            gif_bytes = generate_chain_gif(
+                                chain_players, tracking, dynamic, meta,
+                                downsample=downsample,
+                            )
+                            if gif_bytes:
+                                gif_b64 = base64.b64encode(gif_bytes).decode("ascii")
+                                st.markdown(
+                                    f"<img src=\"data:image/gif;base64,{gif_b64}\" style=\"width:100%; height:auto;\" />",
+                                    unsafe_allow_html=True,
+                                )
+                                st.caption(f"Chain {selected_chain}  |  xTO: {chain_row['xTO']:.3f}")
+                                st.download_button(
+                                    label="Download GIF",
+                                    data=gif_bytes,
+                                    file_name=f"chain_{selected_chain}.gif",
+                                    mime="image/gif",
+                                    icon=":material/download:",
+                                    use_container_width=False,
+                                    icon_position="right",
+                                )
+                            else:
+                                st.warning("Could not generate GIF — no valid frames found for this chain.")
 
 
 # =====================================================================
@@ -920,80 +924,102 @@ with tab_scout:
     pos_groups = sorted(sub_with_pos["position_group"].dropna().unique().tolist())
     all_teams = sorted(sub_with_pos["team_name"].dropna().unique().tolist())
 
-    st.markdown("##### Filter Players <span style='font-size: 14px; font-weight: normal; color: #888;'> (Optional)</span>", unsafe_allow_html=True)
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
+    col_filters, col_content = st.columns([1, 3], gap="large")
+
+    with col_filters:
+        st.markdown("##### Filters")
         sel_positions = st.multiselect("Filter by Position", pos_groups, placeholder="Select one or more positions...")
-    with col_f2:
         sel_teams = st.multiselect("Filter by Team", all_teams, placeholder="Select one or more teams...")
 
-    pool = sub_with_pos.copy()
-    if sel_positions:
-        pool = pool[pool["position_group"].isin(sel_positions)]
-    if sel_teams:
-        pool = pool[pool["team_name"].isin(sel_teams)]
+        pool = sub_with_pos.copy()
+        if sel_positions:
+            pool = pool[pool["position_group"].isin(sel_positions)]
+        if sel_teams:
+            pool = pool[pool["team_name"].isin(sel_teams)]
 
-    available_players = sorted(pool["player_name"].dropna().unique().tolist())
-    
-    st.markdown("##### Select Players <span style='font-size: 14px; font-weight: normal; color: #888;'> (Max 5)</span>", unsafe_allow_html=True)
-    
-    selected_player_names = st.multiselect(
-        "Search and select players (up to 5):",
-        options=available_players,
-        max_selections=5,
-        placeholder="Type to search for players..."
-    )
+        available_players = sorted(pool["player_name"].dropna().unique().tolist())
 
-    st.markdown("---")
+        st.markdown("##### Select Players <span style='font-size: 14px; font-weight: normal; color: #888;'> (Max 5)</span>", unsafe_allow_html=True)
+        selected_player_names = st.multiselect(
+            "Search and select players (up to 5):",
+            options=available_players,
+            max_selections=5,
+            placeholder="Type to search for players..."
+        )
 
     players_info = []
     pools = []
     pos_labels = []
-    COLORS = ["#4169E1", AJAX_RED, "#2E8B57", AJAX_GOLD, "#9370DB"]
+    COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
 
     for idx, p_name in enumerate(selected_player_names):
-        # Identify player row
         row = pool[pool["player_name"] == p_name].iloc[0]
-        
-        # Find percentile reference pool specifically for this player's position
         p_pos = row["position_group"]
         p_pool = sub_with_pos[sub_with_pos["position_group"] == p_pos]
-        
+
         players_info.append((row, p_name, COLORS[idx % len(COLORS)]))
         pools.append(p_pool)
         pos_labels.append(p_pos)
 
-    if len(players_info) > 0:
-        # Determine shared peer pool
-        peer = pd.concat(pools).drop_duplicates("player_id")
-        unique_pos = list(dict.fromkeys(pos_labels))
-        peer_label = " + ".join(unique_pos)
+    with col_content:
+        if len(players_info) > 0:
+            peer = pd.concat(pools).drop_duplicates("player_id")
+            unique_pos = list(dict.fromkeys(pos_labels))
+            peer_label = " + ".join(unique_pos)
 
-        st.caption(f"Percentiles relative to **{peer_label}** ({len(peer)} players, ≥{minutes_threshold} min and ≥{chains_threshold} chains)")
+            st.caption(f"Percentiles relative to **{peer_label}** ({len(peer)} players, ≥{minutes_threshold} min and ≥{chains_threshold} chains)")
 
-        fig, vals_list = build_radar_figure(players_info, peer)
-        st.pyplot(fig, use_container_width=True)
-        plt.close(fig)
+            fig, vals_list = build_radar_figure(players_info, peer)
+            st.pyplot(fig, use_container_width=False)
+            radar_buffer = io.BytesIO()
+            fig.savefig(
+                radar_buffer,
+                format="png",
+                dpi=150,
+                bbox_inches="tight",
+                facecolor=DEFAULT_BG,
+            )
+            radar_bytes = radar_buffer.getvalue()
 
-        # Stats table with raw values + percentiles
-        st.markdown("##### Raw Metric Values & Percentiles")
-        compare_rows = []
-        for i, (col_name, label) in enumerate(PILLARS):
-            row_data = {"Pillar": label.replace("\n", " ")}
-            
-            for p_idx, (row_data_p, name_p, _) in enumerate(players_info):
-                v_p = row_data_p[col_name] if pd.notna(row_data_p[col_name]) else 0
-                if col_name == "chains_per_90":
-                    fmt = "{:.1f}" 
-                elif col_name == "pressing_risk":
-                    fmt = "{:.4f}"
-                else:
-                    fmt = "{:.4f}"
-                row_data[name_p] = fmt.format(v_p)
-                row_data[f"{name_p} Pctile"] = f"{vals_list[p_idx][i]:.0f}th"
-            
-            compare_rows.append(row_data)
-            
-        st.dataframe(pd.DataFrame(compare_rows), use_container_width=True, hide_index=True)
+            def _safe_filename_part(name: str) -> str:
+                ascii_name = name.encode("ascii", "ignore").decode("ascii")
+                ascii_name = re.sub(r"[^A-Za-z0-9]+", "_", ascii_name).strip("_")
+                return ascii_name or "player"
+
+            display_names = selected_player_names
+            name_part = "_vs_".join(_safe_filename_part(n) for n in display_names)
+            file_name = f"pressing_dna_radar_{name_part}.png"
+
+            st.download_button(
+                label="Download Radar",
+                data=radar_bytes,
+                file_name=file_name,
+                mime="image/png",
+                icon=":material/download:",
+                icon_position="right",
+            )
+            plt.close(fig)
+
+            st.markdown("##### Raw Metric Values & Percentiles")
+            compare_rows = []
+            for i, (col_name, label) in enumerate(PILLARS):
+                row_data = {"Pillar": label.replace("\n", " ")}
+
+                for p_idx, (row_data_p, name_p, _) in enumerate(players_info):
+                    v_p = row_data_p[col_name] if pd.notna(row_data_p[col_name]) else 0
+                    if col_name == "chains_per_90":
+                        fmt = "{:.1f}"
+                    elif col_name == "negative_impact_per_chain" or col_name == "pressing_risk" or col_name == "defensive_penalty_per_100_chains" or col_name == "xT_generated_per_100_chains":
+                        fmt = "{:.4f}"
+                    else:
+                        fmt = "{:.3f}"
+                    row_data[name_p] = fmt.format(v_p)
+                    row_data[f"{name_p} Pctile"] = f"{vals_list[p_idx][i]:.0f}th"
+
+                compare_rows.append(row_data)
+
+            st.dataframe(pd.DataFrame(compare_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("Select players on the left to generate the radar and comparison table.")
     
 st.markdown("<br><br>", unsafe_allow_html=True)
