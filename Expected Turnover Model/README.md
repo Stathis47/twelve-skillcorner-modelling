@@ -9,7 +9,7 @@ This repository contains the full automated pipeline for calculating and visuali
 Thesis Project Workspace/
 ├── Expected Turnover Model/
 │   ├── convert_tracking_JSON_to_parquets.py   # Step 1: Data Conversion
-│   ├── xTO_pipeline_final.py             # Step 2: ML Model & SHAP pipeline
+│   ├── xTO_pipeline_final.py                  # Step 2: ML Model & SHAP pipeline
 │   ├── st_xTO.py                              # Step 3: Streamlit tactical visuals
 │   ├── requirements.txt
 │   ├── .env.example                           # Setup your SkillCorner data path
