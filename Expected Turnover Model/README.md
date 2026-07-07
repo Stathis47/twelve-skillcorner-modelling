@@ -9,8 +9,8 @@ This repository contains the full automated pipeline for calculating and visuali
 Thesis Project Workspace/
 ├── Expected Turnover Model/
 │   ├── convert_tracking_JSON_to_parquets.py   # Step 1: Data Conversion
-│   ├── xTO_pipeline_refactored.py             # Step 2: ML Model & SHAP pipeline
-│   ├── xto_tactical_dashboard.py              # Step 3: Streamlit tactical visuals
+│   ├── xTO_pipeline_final.py             # Step 2: ML Model & SHAP pipeline
+│   ├── st_xTO.py                              # Step 3: Streamlit tactical visuals
 │   ├── requirements.txt
 │   ├── .env.example                           # Setup your SkillCorner data path
 │   └── README.md
@@ -49,13 +49,13 @@ python "Expected Turnover Model/convert_tracking_JSON_to_parquets.py"
 #### Step 2: Run the Model Pipeline
 Executes the physical extraction, spatial/chain aggregations, trains the XGBoost chain-level model, and calculates exact Shapley attributions.
 ```bash
-python Expected Turnover Model/xTO_pipeline_refactored.py
+python Expected Turnover Model/xTO_pipeline_final.py
 ```
 
 #### Step 3: Launch the Dashboard
 A local browser window will open automatically.
 ```bash
-streamlit run Expected Turnover Model/xto_tactical_dashboard.py
+streamlit run Expected Turnover Model/st_xTO.py
 ```
 
 ## Dashboard User Guide
